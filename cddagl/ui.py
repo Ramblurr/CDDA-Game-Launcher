@@ -46,9 +46,10 @@ from py7zlib import Archive7z, NoPasswordGivenError, FormatError
 
 from distutils.version import LooseVersion
 
-from pywintypes import error as PyWinError
-
-import winutils
+from cddagl.platform import is_linux, is_windows
+if is_windows():
+    from pywintypes import error as PyWinError
+    import winutils
 
 from PyQt5.QtCore import (
     Qt, QTimer, QUrl, QFileInfo, pyqtSignal, QByteArray, QStringListModel,
@@ -66,10 +67,14 @@ from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from cddagl.config import (
     get_config_value, set_config_value, new_version, get_build_from_sha256,
     new_build, config_true)
-from cddagl.win32 import (
-    find_process_with_file_handle, get_downloads_directory, get_ui_locale,
-    activate_window, SimpleNamedPipe, SingleInstance, process_id_from_path,
-    wait_for_pid)
+
+if is_windows():
+    from cddagl.win32 import (
+        find_process_with_file_handle, get_downloads_directory, get_ui_locale,
+        activate_window, SimpleNamedPipe, SingleInstance, process_id_from_path,
+        wait_for_pid)
+elif is_linux():
+    from cddagl.posix import (get_ui_locale, PyWinError, SimpleNamedPipe, process_id_from_path, wait_for_pid)
 
 from .__version__ import version
 
@@ -142,7 +147,9 @@ def unique(seq):
             yield x
 
 def clean_qt_path(path):
-    return path.replace('/', '\\')
+    if is_windows():
+        return path.replace('/', '\\')
+    return path
 
 def safe_filename(filename):
     keepcharacters = (' ', '.', '_', '-')
@@ -1024,12 +1031,19 @@ class GameDirGroupBox(QGroupBox):
         if params != '':
             params = ' ' + params
 
-        cmd = '"{exe_path}"{params}'.format(exe_path=self.exe_path,
+        if is_windows():
+            cmd_fmt = '"{exe_path}"{params}'
+        elif is_linux():
+            cmd_fmt = '{exe_path}{params}'
+        cmd = cmd_fmt.format(exe_path=self.exe_path,
             params=params)
 
+        print(cmd, exe_dir)
+        kwargs = {}
+        if is_windows():
+            kwargs['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
         try:
-            game_process = subprocess.Popen(cmd, cwd=exe_dir,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+            game_process = subprocess.Popen(cmd, cwd=exe_dir, **kwargs)
         except OSError as e:
             main_window = self.get_main_window()
             status_bar = main_window.statusBar()
@@ -1236,8 +1250,16 @@ antivirus whitelist or select the action to trust this binary when detected.</p>
             self.restore_button.setEnabled(os.path.isdir(previous_version_dir))
 
             # Find the executable
-            console_exe = os.path.join(directory, 'cataclysm.exe')
-            tiles_exe = os.path.join(directory, 'cataclysm-tiles.exe')
+
+            if is_windows():
+                console_name = 'cataclysm.exe'
+                tiles_name = 'cataclysm-tiles.exe'
+            elif is_linux():
+                console_name = 'cataclysm'
+                tiles_name = 'cataclysm-tiles'
+
+            console_exe = os.path.join(directory, console_name)
+            tiles_exe = os.path.join(directory, tiles_name)
 
             exe_path = None
             version_type = None
@@ -1598,9 +1620,15 @@ antivirus whitelist or select the action to trust this binary when detected.</p>
 
         self.previous_exe_path = self.exe_path
         self.exe_path = None
+        if is_windows():
+            console_name = 'cataclysm.exe'
+            tiles_name = 'cataclysm-tiles.exe'
+        elif is_linux():
+            console_name = 'cataclysm'
+            tiles_name = 'cataclysm-tiles'
 
-        console_exe = os.path.join(game_dir, 'cataclysm.exe')
-        tiles_exe = os.path.join(game_dir, 'cataclysm-tiles.exe')
+        console_exe = os.path.join(game_dir, console_name)
+        tiles_exe = os.path.join(game_dir, tiles_name)
 
         exe_path = None
         version_type = None
@@ -1861,27 +1889,28 @@ class UpdateGroupBox(QGroupBox):
 
         layout = QGridLayout()
 
-        platform_label = QLabel()
-        layout.addWidget(platform_label, 0, 0, Qt.AlignRight)
-        self.platform_label = platform_label
+        if is_windows():
+            platform_label = QLabel()
+            layout.addWidget(platform_label, 0, 0, Qt.AlignRight)
+            self.platform_label = platform_label
 
-        platform_button_group = QButtonGroup()
-        self.platform_button_group = platform_button_group
+            platform_button_group = QButtonGroup()
+            self.platform_button_group = platform_button_group
 
-        x64_radio_button = QRadioButton()
-        layout.addWidget(x64_radio_button, 0, 1)
-        self.x64_radio_button = x64_radio_button
-        platform_button_group.addButton(x64_radio_button)
+            x64_radio_button = QRadioButton()
+            layout.addWidget(x64_radio_button, 0, 1)
+            self.x64_radio_button = x64_radio_button
+            platform_button_group.addButton(x64_radio_button)
 
-        platform_button_group.buttonClicked.connect(self.platform_clicked)
+            platform_button_group.buttonClicked.connect(self.platform_clicked)
 
-        if not is_64_windows():
-            x64_radio_button.setEnabled(False)
+            if not is_64_windows():
+                x64_radio_button.setEnabled(False)
 
-        x86_radio_button = QRadioButton()
-        layout.addWidget(x86_radio_button, 0, 2)
-        self.x86_radio_button = x86_radio_button
-        platform_button_group.addButton(x86_radio_button)
+            x86_radio_button = QRadioButton()
+            layout.addWidget(x86_radio_button, 0, 2)
+            self.x86_radio_button = x86_radio_button
+            platform_button_group.addButton(x86_radio_button)
 
         available_builds_label = QLabel()
         layout.addWidget(available_builds_label, 1, 0, Qt.AlignRight)
@@ -1925,9 +1954,10 @@ class UpdateGroupBox(QGroupBox):
         self.set_text()
 
     def set_text(self):
-        self.platform_label.setText(_('Platform:'))
-        self.x64_radio_button.setText(_('Windows x64 (64-bit)'))
-        self.x86_radio_button.setText(_('Windows x86 (32-bit)'))
+        if is_windows():
+            self.platform_label.setText(_('Platform:'))
+            self.x64_radio_button.setText(_('Windows x64 (64-bit)'))
+            self.x86_radio_button.setText(_('Windows x86 (32-bit)'))
         self.available_builds_label.setText(_('Available builds:'))
         self.refresh_builds_button.setText(_('Refresh'))
         self.changelog_groupbox.setTitle(_('Changelog'))
@@ -1938,21 +1968,22 @@ class UpdateGroupBox(QGroupBox):
         if not self.shown:
             platform = get_config_value('platform')
 
-            if platform == 'Windows x64':
-                platform = 'x64'
-            elif platform == 'Windows x86':
-                platform = 'x86'
-
-            if platform is None or platform not in ('x64', 'x86'):
-                if is_64_windows():
+            if is_windows():
+                if platform == 'Windows x64':
                     platform = 'x64'
-                else:
+                elif platform == 'Windows x86':
                     platform = 'x86'
 
-            if platform == 'x64':
-                self.x64_radio_button.setChecked(True)
-            elif platform == 'x86':
-                self.x86_radio_button.setChecked(True)
+                if platform is None or platform not in ('x64', 'x86'):
+                    if is_64_windows():
+                        platform = 'x64'
+                    else:
+                        platform = 'x86'
+
+                if platform == 'x64':
+                    self.x64_radio_button.setChecked(True)
+                elif platform == 'x86':
+                    self.x86_radio_button.setChecked(True)
 
             self.start_lb_request(BASE_ASSETS['Tiles'][platform])
             self.refresh_changelog()
@@ -2251,8 +2282,9 @@ class UpdateGroupBox(QGroupBox):
         return self.get_main_tab().get_main_window()
 
     def disable_controls(self, update_button=False):
-        self.x64_radio_button.setEnabled(False)
-        self.x86_radio_button.setEnabled(False)
+        if is_windows():
+            self.x64_radio_button.setEnabled(False)
+            self.x86_radio_button.setEnabled(False)
 
         self.previous_bc_enabled = self.builds_combo.isEnabled()
         self.builds_combo.setEnabled(False)
@@ -2263,9 +2295,10 @@ class UpdateGroupBox(QGroupBox):
             self.update_button.setEnabled(False)
 
     def enable_controls(self, builds_combo=False, update_button=False):
-        if is_64_windows():
-            self.x64_radio_button.setEnabled(True)
-        self.x86_radio_button.setEnabled(True)
+        if is_windows():
+            if is_64_windows():
+                self.x64_radio_button.setEnabled(True)
+            self.x86_radio_button.setEnabled(True)
 
         self.refresh_builds_button.setEnabled(True)
 

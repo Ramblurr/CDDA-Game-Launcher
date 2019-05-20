@@ -25,10 +25,14 @@ else:
     basedir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     sys.path.append(basedir)
 
+from cddagl.platform import is_linux, is_windows
 from cddagl.config import init_config, get_config_value, config_true
 from cddagl.ui import start_ui, ui_exception
 
-from cddagl.win32 import get_ui_locale, SingleInstance, write_named_pipe
+if is_windows():
+    from cddagl.win32 import get_ui_locale, SingleInstance, write_named_pipe
+elif is_linux():
+    from cddagl.posix import get_ui_locale, SingleInstance
 
 from cddagl.__version__ import version
 
